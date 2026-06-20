@@ -1,5 +1,5 @@
 import { reactive, computed, watch } from 'vue'
-import type { GameState, Bird, Berry, GrowthStage, Personality, BerryType, Weather, GameScore } from '@/types/game'
+import type { GameState, Bird, Berry, GrowthStage, Personality, BerryType, Weather, GameScore, Expedition, RareResource, ExpeditionDistance, RareResourceType } from '@/types/game'
 import {
   ATTR_MIN, ATTR_MAX, DEATH_THRESHOLD,
   STAGE_DURATION, FOOD_NEED_MULTIPLIER,
@@ -8,6 +8,12 @@ import {
   BERRY_VALUES, WEATHER_CHANGE_INTERVAL, WEATHER_EFFECTS,
   DAY_DURATION, INITIAL_FOOD, MIN_EGGS, MAX_EGGS,
   MAX_BREEDING_ROUNDS, BIRD_NAMES,
+  EXPEDITION_DISTANCE_NAMES, EXPEDITION_DURATION, EXPEDITION_BASE_RISK,
+  EXPEDITION_REWARD_MULTIPLIER, EXPEDITION_TEAM_SIZE,
+  EXPEDITION_WEATHER_EFFECTS, EXPEDITION_SEASON_DURATION,
+  EXPEDITION_SEASON_UNLOCK_DAY, EXPEDITION_HEALTH_LOSS_BASE,
+  EXPEDITION_FOOD_COST, PERSONALITY_EXPEDITION_MODS,
+  RARE_RESOURCE_RARITY, RARE_RESOURCE_EMOJI, RARE_RESOURCE_NAMES,
 } from '@/utils/constants'
 import { randomInt, randomFloat, clamp, randomChoice, generateId, chance } from '@/utils/random'
 import { saveGame, loadGame, clearSave } from '@/utils/storage'
@@ -26,6 +32,18 @@ const createInitialState = (): GameState => ({
   breedingCount: 0,
   maxBreedingRounds: MAX_BREEDING_ROUNDS,
   eventLog: [],
+  expeditionSeason: {
+    isActive: false,
+    seasonDay: 0,
+    totalExpeditions: 0,
+    successfulExpeditions: 0,
+    resourcesCollected: [],
+    seasonEndDay: 0,
+  },
+  expeditions: [],
+  rareResources: [],
+  selectedExpeditionBirdIds: [],
+  showExpeditionPanel: false,
 })
 
 const state = reactive<GameState>(createInitialState())
@@ -76,7 +94,303 @@ const createEgg = (index: number): Bird => {
     isDead: false,
     feedingCount: 0,
     lastFedAt: 0,
+    expeditionCount: 0,
+    successfulExpeditions: 0,
   }
+}
+
+const RARE_RESOURCE_TYPES: RareResourceType[] = ['feather', 'herb', 'crystal', 'pearl', 'starstone']
+
+const generateRareResource = (distance: ExpeditionDistance, weather: Weather): RareResource => {
+  const distMult = EXPEDITION_REWARD_MULTIPLIER[distance]
+  const weatherMod = EXPEDITION_WEATHER_EFFECTS[weather].rewardMod
+
+  const availableTypes = RARE_RESOURCE_TYPES.filter(t => {
+    const rarity = RARE_RESOURCE_RARITY[t]
+    return rarity <= distMult + 1
+  })
+
+  const weights = availableTypes.map(t => {
+    const rarity = RARE_RESOURCE_RARITY[t]
+    return 1 / (rarity * rarity)
+  })
+
+  const totalWeight = weights.reduce((s, w) => s + w, 0)
+  let rand = Math.random() * totalWeight
+  let selectedType: RareResourceType = availableTypes[0]
+
+  for (let i = 0; i < availableTypes.length; i++) {
+    rand -= weights[i]
+    if (rand <= 0) {
+      selectedType = availableTypes[i]
+      break
+    }
+  }
+
+  const baseAmount = randomInt(1, 3)
+  const amount = Math.max(1, Math.round(baseAmount * distMult * weatherMod))
+
+  return {
+    id: generateId(),
+    type: selectedType,
+    amount,
+    rarity: RARE_RESOURCE_RARITY[selectedType],
+  }
+}
+
+const calculateExpeditionRisk = (birdIds: string[], distance: ExpeditionDistance, weather: Weather): number => {
+  const birds = state.birds.filter(b => birdIds.includes(b.id) && !b.isDead)
+  if (birds.length === 0) return 1
+
+  const baseRisk = EXPEDITION_BASE_RISK[distance]
+  const weatherMod = EXPEDITION_WEATHER_EFFECTS[weather].riskMod
+
+  let personalityMod = 0
+  birds.forEach(bird => {
+    const mod = PERSONALITY_EXPEDITION_MODS[bird.personality]
+    personalityMod += mod ? mod.riskMod : 1
+  })
+  personalityMod /= birds.length
+
+  const avgHealth = birds.reduce((s, b) => s + b.health, 0) / birds.length
+  const healthMod = 2 - avgHealth / 100
+
+  const teamSizeMod = birds.length >= 3 ? 0.85 : birds.length === 2 ? 0.95 : 1.2
+
+  let risk = baseRisk * weatherMod * personalityMod * healthMod * teamSizeMod
+  return clamp(risk, 0.05, 0.95)
+}
+
+const calculateExpeditionHealthLoss = (distance: ExpeditionDistance, weather: Weather, risk: number): number => {
+  const baseLoss = EXPEDITION_HEALTH_LOSS_BASE[distance]
+  const weatherMod = EXPEDITION_WEATHER_EFFECTS[weather].healthMod
+  return Math.round(baseLoss * weatherMod * (0.5 + risk * 0.5))
+}
+
+const addRareResource = (resource: RareResource) => {
+  const existing = state.rareResources.find(r => r.type === resource.type)
+  if (existing) {
+    existing.amount += resource.amount
+  } else {
+    state.rareResources.push({ ...resource })
+  }
+}
+
+const createExpedition = (birdIds: string[], distance: ExpeditionDistance): Expedition | null => {
+  const birds = state.birds.filter(b => birdIds.includes(b.id) && b.stage === 'adult' && !b.isDead && !b.isOnExpedition)
+  if (birds.length < EXPEDITION_TEAM_SIZE.min || birds.length > EXPEDITION_TEAM_SIZE.max) return null
+
+  const foodCost = EXPEDITION_FOOD_COST[distance]
+  if (state.foodStock < foodCost) return null
+
+  state.foodStock -= foodCost
+
+  const duration = EXPEDITION_DURATION[distance]
+  const risk = calculateExpeditionRisk(birdIds, distance, state.currentWeather)
+
+  const expedition: Expedition = {
+    id: generateId(),
+    birdIds: birds.map(b => b.id),
+    distance,
+    status: 'traveling',
+    startTime: Date.now(),
+    duration,
+    returnTime: Date.now() + duration,
+    progress: 0,
+    riskLevel: risk,
+    weatherEncountered: [state.currentWeather],
+    currentWeather: state.currentWeather,
+    rewards: [],
+    healthLoss: 0,
+    success: true,
+  }
+
+  birds.forEach(bird => {
+    bird.isAway = true
+    bird.isOnExpedition = true
+    bird.expeditionId = expedition.id
+    if (bird.expeditionCount !== undefined) bird.expeditionCount++
+  })
+
+  state.expeditions.push(expedition)
+  state.expeditionSeason.totalExpeditions++
+
+  const birdNames = birds.map(b => b.name).join('、')
+  addEventLog(`🗺️ ${birdNames} 出发了！目标：${EXPEDITION_DISTANCE_NAMES[distance]}`, 'info')
+
+  return expedition
+}
+
+const updateExpeditions = (deltaMs: number) => {
+  const now = Date.now()
+
+  state.expeditions.forEach(expedition => {
+    if (expedition.status === 'completed' || expedition.status === 'failed') return
+
+    const elapsed = now - expedition.startTime
+    expedition.progress = clamp(elapsed / expedition.duration, 0, 1)
+
+    if (chance(deltaMs / 20000)) {
+      const newWeather = randomChoice(WEATHERS)
+      if (newWeather !== expedition.currentWeather) {
+        expedition.currentWeather = newWeather
+        expedition.weatherEncountered.push(newWeather)
+      }
+    }
+
+    if (now >= expedition.returnTime) {
+      completeExpedition(expedition)
+    }
+  })
+}
+
+const completeExpedition = (expedition: Expedition) => {
+  const birds = state.birds.filter(b => expedition.birdIds.includes(b.id))
+
+  let overallRisk = 0
+  expedition.weatherEncountered.forEach(weather => {
+    const weatherRisk = EXPEDITION_WEATHER_EFFECTS[weather].riskMod
+    overallRisk += weatherRisk
+  })
+  overallRisk /= expedition.weatherEncountered.length
+  overallRisk *= expedition.riskLevel
+
+  const success = !chance(overallRisk * 0.6)
+
+  if (success) {
+    expedition.status = 'completed'
+    expedition.success = true
+    state.expeditionSeason.successfulExpeditions++
+
+    const rewardCount = randomInt(1, 3) + Math.floor(EXPEDITION_REWARD_MULTIPLIER[expedition.distance])
+    for (let i = 0; i < rewardCount; i++) {
+      const weather = randomChoice(expedition.weatherEncountered)
+      const reward = generateRareResource(expedition.distance, weather)
+      expedition.rewards.push(reward)
+      addRareResource(reward)
+    }
+
+    birds.forEach(bird => {
+      if (bird.successfulExpeditions !== undefined) bird.successfulExpeditions++
+    })
+
+    const healthLoss = calculateExpeditionHealthLoss(
+      expedition.distance,
+      expedition.currentWeather,
+      expedition.riskLevel
+    )
+    expedition.healthLoss = healthLoss
+
+    birds.forEach(bird => {
+      bird.health = clamp(bird.health - healthLoss, ATTR_MIN, ATTR_MAX)
+      bird.hunger = clamp(bird.hunger - randomInt(10, 25), ATTR_MIN, ATTR_MAX)
+      bird.fear = clamp(bird.fear + randomInt(5, 15), ATTR_MIN, ATTR_MAX)
+    })
+
+    const rewardSummary = expedition.rewards
+      .map(r => `${RARE_RESOURCE_EMOJI[r.type]} ${RARE_RESOURCE_NAMES[r.type]} x${r.amount}`)
+      .join('、')
+    const birdNames = birds.map(b => b.name).join('、')
+    addEventLog(
+      `🎉 远征成功！${birdNames} 带回了 ${rewardSummary}`,
+      'success'
+    )
+  } else {
+    expedition.status = 'failed'
+    expedition.success = false
+
+    const severeLoss = chance(overallRisk * 0.3)
+
+    if (severeLoss) {
+      const deadIndex = randomInt(0, birds.length - 1)
+      const deadBird = birds[deadIndex]
+      deadBird.isDead = true
+      state.totalDied++
+
+      birds.forEach((bird, idx) => {
+        if (idx !== deadIndex) {
+          bird.health = clamp(bird.health - randomInt(20, 35), ATTR_MIN, ATTR_MAX)
+          bird.fear = clamp(bird.fear + randomInt(20, 40), ATTR_MIN, ATTR_MAX)
+          if (bird.health <= DEATH_THRESHOLD) {
+            bird.isDead = true
+            state.totalDied++
+          }
+        }
+      })
+
+      addEventLog(
+        `💔 远征失败... ${deadBird.name} 在途中牺牲了`,
+        'danger'
+      )
+    } else {
+      const healthLoss = calculateExpeditionHealthLoss(
+        expedition.distance,
+        expedition.currentWeather,
+        expedition.riskLevel
+      ) * 1.5
+
+      expedition.healthLoss = Math.round(healthLoss)
+
+      birds.forEach(bird => {
+        bird.health = clamp(bird.health - healthLoss, ATTR_MIN, ATTR_MAX)
+        bird.hunger = clamp(bird.hunger - randomInt(15, 30), ATTR_MIN, ATTR_MAX)
+        bird.fear = clamp(bird.fear + randomInt(15, 30), ATTR_MIN, ATTR_MAX)
+        if (bird.health <= DEATH_THRESHOLD) {
+          bird.isDead = true
+          state.totalDied++
+        }
+      })
+
+      const birdNames = birds.map(b => b.name).join('、')
+      addEventLog(
+        `😢 远征失败！${birdNames} 空手而归，还受了伤...`,
+        'warning'
+      )
+    }
+  }
+
+  birds.forEach(bird => {
+    if (!bird.isDead) {
+      bird.isAway = false
+      bird.isOnExpedition = false
+      bird.expeditionId = undefined
+      bird.awayUntil = undefined
+    }
+  })
+}
+
+const toggleExpeditionBird = (birdId: string) => {
+  const idx = state.selectedExpeditionBirdIds.indexOf(birdId)
+  if (idx >= 0) {
+    state.selectedExpeditionBirdIds.splice(idx, 1)
+  } else if (state.selectedExpeditionBirdIds.length < EXPEDITION_TEAM_SIZE.max) {
+    state.selectedExpeditionBirdIds.push(birdId)
+  }
+}
+
+const startExpeditionSeason = () => {
+  state.expeditionSeason.isActive = true
+  state.expeditionSeason.seasonDay = state.day
+  state.expeditionSeason.seasonEndDay = state.day + EXPEDITION_SEASON_DURATION
+  addEventLog(`🦅 候鸟远行赛季开始啦！为期 ${EXPEDITION_SEASON_DURATION} 天`, 'success')
+}
+
+const checkExpeditionSeason = () => {
+  if (!state.expeditionSeason.isActive && state.day >= EXPEDITION_SEASON_UNLOCK_DAY) {
+    const adults = state.birds.filter(b => b.stage === 'adult' && !b.isDead)
+    if (adults.length >= EXPEDITION_TEAM_SIZE.min) {
+      startExpeditionSeason()
+    }
+  }
+
+  if (state.expeditionSeason.isActive && state.day >= state.expeditionSeason.seasonEndDay) {
+    state.expeditionSeason.isActive = false
+    addEventLog('🏆 候鸟远行赛季结束！感谢所有勇敢的探险家~', 'info')
+  }
+}
+
+const toggleExpeditionPanel = () => {
+  state.showExpeditionPanel = !state.showExpeditionPanel
 }
 
 const addEventLog = (message: string, type: string = 'info') => {
@@ -149,6 +463,9 @@ const updateGame = (deltaMs: number) => {
   aliveBirds.forEach(bird => {
     updateBird(bird, deltaMs, weatherEffect)
   })
+
+  updateExpeditions(deltaMs)
+  checkExpeditionSeason()
 
   cleanupExpiredBerries()
   checkGameEnd()
@@ -490,6 +807,26 @@ watch(
   }
 )
 
+const availableExpeditionBirds = computed(() => {
+  return state.birds.filter(b =>
+    b.stage === 'adult' &&
+    !b.isDead &&
+    !b.isOnExpedition &&
+    !b.isSick &&
+    b.health > 30
+  )
+})
+
+const activeExpeditions = computed(() => {
+  return state.expeditions.filter(e => e.status === 'traveling' || e.status === 'returning')
+})
+
+const completedExpeditions = computed(() => {
+  return state.expeditions.filter(e => e.status === 'completed' || e.status === 'failed')
+    .sort((a, b) => b.startTime - a.startTime)
+    .slice(0, 10)
+})
+
 export function useGameState() {
   return {
     state,
@@ -506,5 +843,12 @@ export function useGameState() {
     tryLoadGame,
     allAdults,
     aliveCount,
+    createExpedition,
+    toggleExpeditionBird,
+    toggleExpeditionPanel,
+    calculateExpeditionRisk,
+    availableExpeditionBirds,
+    activeExpeditions,
+    completedExpeditions,
   }
 }

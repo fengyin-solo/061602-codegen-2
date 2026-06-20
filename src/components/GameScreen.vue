@@ -7,6 +7,7 @@ import NestScene from './NestScene.vue'
 import WeatherOverlay from './WeatherOverlay.vue'
 import BirdCard from './BirdCard.vue'
 import EventModal from './EventModal.vue'
+import ExpeditionPanel from './ExpeditionPanel.vue'
 import { WEATHER_COLORS } from '@/utils/constants'
 
 const router = useRouter()
@@ -14,6 +15,7 @@ const {
   state, allAdults, aliveCount,
   collectBerry, feedBird, calmBird, buryBird,
   releaseBirds, keepAndBreed, returnToStart, tryLoadGame,
+  toggleExpeditionPanel, activeExpeditions,
 } = useGameState()
 
 onMounted(() => {
@@ -102,12 +104,25 @@ const handleCollect = (id: string) => {
         </div>
       </div>
 
-      <div class="flex justify-center gap-3">
+      <div class="flex justify-center gap-3 flex-wrap">
         <button
           class="px-4 py-2 glass rounded-xl text-white/80 text-sm hover:bg-white/20 transition-all flex items-center gap-1.5"
           @click="returnToStart(); router.push('/')"
         >
           <span>🏠</span> 返回主页
+        </button>
+        <button
+          v-if="state.expeditionSeason.isActive"
+          class="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 rounded-xl text-white text-sm font-medium hover:from-amber-400 hover:to-orange-500 transition-all flex items-center gap-1.5 btn-3d"
+          @click="toggleExpeditionPanel"
+        >
+          <span>🗺️</span> 候鸟远行
+          <span
+            v-if="activeExpeditions.length > 0"
+            class="w-5 h-5 -mr-1 bg-red-500 rounded-full text-[10px] flex items-center justify-center"
+          >
+            {{ activeExpeditions.length }}
+          </span>
         </button>
         <div class="glass rounded-xl px-4 py-2 text-white/80 text-sm flex items-center gap-2">
           <span>💚</span> 存活 {{ aliveCount }} 只
@@ -118,5 +133,10 @@ const handleCollect = (id: string) => {
         </div>
       </div>
     </div>
+
+    <ExpeditionPanel
+      v-if="state.showExpeditionPanel"
+      @close="toggleExpeditionPanel"
+    />
   </div>
 </template>

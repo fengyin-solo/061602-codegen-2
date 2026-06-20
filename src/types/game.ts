@@ -8,6 +8,46 @@ export type BerryType = 'red' | 'blue' | 'golden'
 
 export type GamePhase = 'start' | 'playing' | 'breeding' | 'ended'
 
+export type RareResourceType = 'feather' | 'crystal' | 'herb' | 'pearl' | 'starstone'
+
+export type ExpeditionDistance = 'near' | 'medium' | 'far' | 'extreme'
+
+export type ExpeditionStatus = 'preparing' | 'traveling' | 'returning' | 'completed' | 'failed'
+
+export interface RareResource {
+  id: string
+  type: RareResourceType
+  amount: number
+  rarity: number
+}
+
+export interface Expedition {
+  id: string
+  birdIds: string[]
+  distance: ExpeditionDistance
+  status: ExpeditionStatus
+  startTime: number
+  duration: number
+  returnTime: number
+  progress: number
+  riskLevel: number
+  weatherEncountered: Weather[]
+  currentWeather: Weather
+  rewards: RareResource[]
+  healthLoss: number
+  success: boolean
+  resultMessage?: string
+}
+
+export interface ExpeditionSeason {
+  isActive: boolean
+  seasonDay: number
+  totalExpeditions: number
+  successfulExpeditions: number
+  resourcesCollected: RareResource[]
+  seasonEndDay: number
+}
+
 export interface Bird {
   id: string
   name: string
@@ -29,6 +69,10 @@ export interface Bird {
   justHatched?: boolean
   justGrew?: boolean
   justFed?: boolean
+  isOnExpedition?: boolean
+  expeditionId?: string
+  expeditionCount?: number
+  successfulExpeditions?: number
 }
 
 export interface Berry {
@@ -56,6 +100,11 @@ export interface GameState {
   eventLog: { id: string; message: string; type: string; timestamp: number }[]
   score?: GameScore
   selectedBirdId?: string
+  expeditionSeason: ExpeditionSeason
+  expeditions: Expedition[]
+  rareResources: RareResource[]
+  selectedExpeditionBirdIds: string[]
+  showExpeditionPanel: boolean
 }
 
 export interface GameScore {

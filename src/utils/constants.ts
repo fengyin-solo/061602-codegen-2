@@ -1,4 +1,4 @@
-import type { Weather, WeatherEffect, BerryType, GrowthStage, Personality } from '@/types/game'
+import type { Weather, WeatherEffect, BerryType, GrowthStage, Personality, RareResourceType, ExpeditionDistance } from '@/types/game'
 
 export const ATTR_MIN = 0
 export const ATTR_MAX = 100
@@ -110,3 +110,107 @@ export const BIRD_NAMES = [
   '糖糖', '圆圆', '小米', '小麦', '云朵', '星星', '月亮', '太阳',
   '小橘', '小蓝', '小绿', '小红', '阿黄', '阿白', '阿黑', '阿灰',
 ]
+
+export const RARE_RESOURCE_NAMES: Record<RareResourceType, string> = {
+  feather: '彩虹羽毛',
+  crystal: '月光水晶',
+  herb: '灵草',
+  pearl: '深海珍珠',
+  starstone: '星辰石',
+}
+
+export const RARE_RESOURCE_EMOJI: Record<RareResourceType, string> = {
+  feather: '🪶',
+  crystal: '💎',
+  herb: '🌿',
+  pearl: '🦪',
+  starstone: '⭐',
+}
+
+export const RARE_RESOURCE_COLORS: Record<RareResourceType, string> = {
+  feather: 'from-pink-400 to-purple-500',
+  crystal: 'from-blue-400 to-cyan-300',
+  herb: 'from-green-400 to-emerald-500',
+  pearl: 'from-gray-200 to-blue-200',
+  starstone: 'from-yellow-400 to-orange-500',
+}
+
+export const RARE_RESOURCE_RARITY: Record<RareResourceType, number> = {
+  feather: 1,
+  crystal: 2,
+  herb: 1,
+  pearl: 3,
+  starstone: 4,
+}
+
+export const EXPEDITION_DISTANCE_NAMES: Record<ExpeditionDistance, string> = {
+  near: '近郊探索',
+  medium: '山谷远行',
+  far: '跨海远征',
+  extreme: '极限征途',
+}
+
+export const EXPEDITION_DISTANCE_DESC: Record<ExpeditionDistance, string> = {
+  near: '风险较低，收获一般，适合新手队伍',
+  medium: '中等风险，收益可观，需要一定经验',
+  far: '高风险高回报，跨越海洋寻找珍稀宝物',
+  extreme: '九死一生的极限征途，传说级宝藏在等待',
+}
+
+export const EXPEDITION_DURATION: Record<ExpeditionDistance, number> = {
+  near: 30000,
+  medium: 60000,
+  far: 90000,
+  extreme: 120000,
+}
+
+export const EXPEDITION_BASE_RISK: Record<ExpeditionDistance, number> = {
+  near: 0.1,
+  medium: 0.25,
+  far: 0.45,
+  extreme: 0.7,
+}
+
+export const EXPEDITION_REWARD_MULTIPLIER: Record<ExpeditionDistance, number> = {
+  near: 1,
+  medium: 2,
+  far: 4,
+  extreme: 8,
+}
+
+export const EXPEDITION_TEAM_SIZE = {
+  min: 1,
+  max: 4,
+}
+
+export const EXPEDITION_WEATHER_EFFECTS: Record<Weather, { riskMod: number; rewardMod: number; healthMod: number }> = {
+  sunny: { riskMod: 0.8, rewardMod: 1.2, healthMod: 0.9 },
+  rainy: { riskMod: 1.2, rewardMod: 0.9, healthMod: 1.3 },
+  snowy: { riskMod: 1.5, rewardMod: 1.1, healthMod: 1.8 },
+  stormy: { riskMod: 2.0, rewardMod: 0.7, healthMod: 2.5 },
+}
+
+export const EXPEDITION_SEASON_DURATION = 7
+export const EXPEDITION_SEASON_UNLOCK_DAY = 3
+
+export const EXPEDITION_HEALTH_LOSS_BASE: Record<ExpeditionDistance, number> = {
+  near: 5,
+  medium: 12,
+  far: 20,
+  extreme: 30,
+}
+
+export const EXPEDITION_FOOD_COST: Record<ExpeditionDistance, number> = {
+  near: 10,
+  medium: 20,
+  far: 35,
+  extreme: 50,
+}
+
+export const PERSONALITY_EXPEDITION_MODS: Record<string, { riskMod: number; rewardMod: number }> = {
+  bold: { riskMod: 0.7, rewardMod: 1.3 },
+  shy: { riskMod: 1.4, rewardMod: 0.8 },
+  gentle: { riskMod: 1.1, rewardMod: 1.0 },
+  curious: { riskMod: 1.0, rewardMod: 1.2 },
+  stubborn: { riskMod: 0.9, rewardMod: 1.1 },
+}
