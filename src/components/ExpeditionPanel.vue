@@ -7,9 +7,9 @@ import {
   EXPEDITION_DISTANCE_NAMES, EXPEDITION_DISTANCE_DESC,
   EXPEDITION_BASE_RISK, EXPEDITION_REWARD_MULTIPLIER,
   EXPEDITION_FOOD_COST, EXPEDITION_TEAM_SIZE,
-  EXPEDITION_WEATHER_EFFECTS,
+  EXPEDITION_WEATHER_EFFECTS, EXPEDITION_DURATION, EXPEDITION_HEALTH_LOSS_BASE,
   RARE_RESOURCE_NAMES, RARE_RESOURCE_EMOJI, RARE_RESOURCE_COLORS, RARE_RESOURCE_RARITY,
-  WEATHER_NAMES, PERSONALITY_NAMES, PERSONALITY_EMOJI,
+  WEATHER_NAMES, PERSONALITY_NAMES, PERSONALITY_EMOJI, PERSONALITY_EXPEDITION_MODS,
 } from '@/utils/constants'
 
 const emit = defineEmits<{
@@ -90,6 +90,33 @@ const formatTime = (ms: number) => {
 const getRemainingTime = (expedition: { returnTime: number }) => {
   const remaining = expedition.returnTime - Date.now()
   return Math.max(0, remaining)
+}
+
+const getStarDisplay = (rarity: number) => {
+  return '★'.repeat(rarity) + '☆'.repeat(Math.max(0, 5 - rarity))
+}
+
+const currentExpectedRewards = computed(() => {
+  const distMult = EXPEDITION_REWARD_MULTIPLIER[selectedDistance.value]
+  const weatherMod = EXPEDITION_WEATHER_EFFECTS[state.currentWeather].rewardMod
+  const expectedCount = Math.round((1 + distMult) * weatherMod)
+  return expectedCount
+})
+
+const currentExpectedHealthLoss = computed(() => {
+  return EXPEDITION_HEALTH_LOSS_BASE[selectedDistance.value]
+})
+
+const currentDistanceBaseRisk = computed(() => {
+  return EXPEDITION_BASE_RISK[selectedDistance.value]
+})
+
+const getRiskLevelText = (risk: number) => {
+  if (risk < 0.15) return '安全'
+  if (risk < 0.3) return '低风险'
+  if (risk < 0.5) return '中等风险'
+  if (risk < 0.7) return '高风险'
+  return '极度危险'
 }
 </script>
 
@@ -226,29 +253,41 @@ const getRemainingTime = (expedition: { returnTime: number }) => {
                   :class="[
                     'p-3 rounded-xl cursor-pointer transition-all border-2',
                     selectedDistance === dist
-                      ? 'bg-gradient-to-br from-blue-500/30 to-purple-500/30 border-blue-400'
-                      : 'bg-white/5 border-transparent hover:bg-white/10',
+                      ? 'bg-gradient-to-br from-blue-500/30 to-purple-500/30 border-blue-400 scale-[1.02] card-shadow'
+                      : 'bg-white/5 border-transparent hover:bg-white/10 hover:border-white/20',
                   ]"
                   @click="selectedDistance = dist"
                 >
                   <div class="font-medium text-white text-sm mb-1">
                     {{ EXPEDITION_DISTANCE_NAMES[dist] }}
                   </div>
-                  <div class="text-[10px] text-white/60 mb-2">
+                  <div class="text-[10px] text-white/60 mb-2 leading-tight">
                     {{ EXPEDITION_DISTANCE_DESC[dist] }}
                   </div>
-                  <div class="space-y-1 text-[10px]">
-                    <div class="flex justify-between text-white/50">
+                  <div class="space-y-1.5 text-[10px]">
+                    <div class="flex justify-between text-white/60">
                       <span>⏱️ 时长</span>
-                      <span>{{ formatTime(EXPEDITION_DURATION[dist]) }}</span>
+                      <span class="font-medium text-white/80">{{ formatTime(EXPEDITION_DURATION[dist]) }}</span>
                     </div>
-                    <div class="flex justify-between text-white/50">
+                    <div class="flex justify-between text-white/60">
                       <span>🍒 消耗</span>
-                      <span>{{ EXPEDITION_FOOD_COST[dist] }}</span>
+                      <span class="font-medium text-white/80">{{ EXPEDITION_FOOD_COST[dist] }}</span>
                     </div>
-                    <div class="flex justify-between text-white/50">
-                      <span>💰 倍率</span>
-                      <span class="text-yellow-400">x{{ EXPEDITION_REWARD_MULTIPLIER[dist] }}</span>
+                    <div class="flex justify-between text-white/60">
+                      <span>💰 奖励倍率</span>
+                      <span class="font-bold text-yellow-400">x{{ EXPEDITION_REWARD_MULTIPLIER[dist] }}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-white/60">
+                      <span>⚠️ 基础风险</span>
+                      <span :class="['font-bold', getRiskColor(EXPEDITION_BASE_RISK[dist])]">
+                        {{ (EXPEDITION_BASE_RISK[dist] * 100).toFixed(0) }}%
+                      </span>
+                    </div>
+                    <div class="h-1 bg-black/30 rounded-full overflow-hidden mt-1">
+                      <div
+                        :class="['h-full bg-gradient-to-r', getRiskBarColor(EXPEDITION_BASE_RISK[dist])]"
+                        :style="{ width: `${EXPEDITION_BASE_RISK[dist] * 100}%` }"
+                      />
                     </div>
                   </div>
                 </div>
@@ -256,29 +295,43 @@ const getRemainingTime = (expedition: { returnTime: number }) => {
             </div>
 
             <div class="glass rounded-2xl p-4">
-              <div class="text-sm text-white/70 mb-3 flex items-center gap-2">
+              <div class="text-sm text-white/70 mb-4 flex items-center gap-2">
                 <span>📊</span>
-                风险评估
+                风险收益评估
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div class="space-y-3">
-                  <div>
-                    <div class="flex justify-between text-sm mb-1">
-                      <span class="text-white/70">综合风险</span>
-                      <span :class="['font-bold', getRiskColor(currentRisk)]">
-                        {{ (currentRisk * 100).toFixed(1) }}%
-                      </span>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div class="space-y-4">
+                  <div class="bg-red-500/10 rounded-xl p-3 border border-red-500/20">
+                    <div class="text-xs text-red-300 mb-2 flex items-center gap-1">
+                      <span>⚠️</span> 风险分析
                     </div>
-                    <div class="h-3 bg-black/30 rounded-full overflow-hidden">
-                      <div
-                        :class="['h-full bg-gradient-to-r transition-all duration-500', getRiskBarColor(currentRisk)]"
-                        :style="{ width: `${currentRisk * 100}%` }"
-                      />
+                    <div>
+                      <div class="flex justify-between text-sm mb-1.5">
+                        <span class="text-white/80">综合失败概率</span>
+                        <span :class="['font-bold text-lg', getRiskColor(currentRisk)]">
+                          {{ (currentRisk * 100).toFixed(1) }}%
+                        </span>
+                      </div>
+                      <div class="h-3 bg-black/30 rounded-full overflow-hidden">
+                        <div
+                          :class="['h-full bg-gradient-to-r transition-all duration-500', getRiskBarColor(currentRisk)]"
+                          :style="{ width: `${currentRisk * 100}%` }"
+                        />
+                      </div>
+                      <div class="text-center text-xs mt-1.5" :class="getRiskColor(currentRisk)">
+                        {{ currentRisk > 0 ? getRiskLevelText(currentRisk) : '请选择队员' }}
+                      </div>
                     </div>
                   </div>
 
                   <div class="space-y-1.5 text-xs">
+                    <div class="flex justify-between text-white/60">
+                      <span>🏔️ 距离基础风险</span>
+                      <span :class="getRiskColor(currentDistanceBaseRisk)">
+                        {{ (currentDistanceBaseRisk * 100).toFixed(0) }}%
+                      </span>
+                    </div>
                     <div class="flex justify-between text-white/60">
                       <span>🌤️ 当前天气</span>
                       <span>{{ WEATHER_NAMES[state.currentWeather] }}</span>
@@ -291,29 +344,91 @@ const getRemainingTime = (expedition: { returnTime: number }) => {
                       </span>
                     </div>
                     <div class="flex justify-between text-white/60">
-                      <span>🐦 队伍人数</span>
+                      <span>� 天气收益加成</span>
+                      <span :class="EXPEDITION_WEATHER_EFFECTS[state.currentWeather].rewardMod > 1 ? 'text-green-400' : 'text-red-400'">
+                        {{ EXPEDITION_WEATHER_EFFECTS[state.currentWeather].rewardMod > 1 ? '+' : '' }}
+                        {{ ((EXPEDITION_WEATHER_EFFECTS[state.currentWeather].rewardMod - 1) * 100).toFixed(0) }}%
+                      </span>
+                    </div>
+                    <div class="flex justify-between text-white/60">
+                      <span>� 队伍人数</span>
                       <span>{{ state.selectedExpeditionBirdIds.length }} 只</span>
                     </div>
                   </div>
                 </div>
 
-                <div class="space-y-2">
-                  <div class="text-xs text-white/70 mb-1">队伍成员:</div>
-                  <div v-if="selectedBirds.length > 0" class="space-y-1.5">
-                    <div
-                      v-for="bird in selectedBirds"
-                      :key="bird.id"
-                      class="flex items-center gap-2 text-xs"
-                    >
-                      <span class="w-4 h-4 rounded-full bg-yellow-400/20 flex items-center justify-center text-[10px]">🐦</span>
-                      <span class="text-white/80">{{ bird.name }}</span>
-                      <span class="text-white/40 ml-auto">
-                        健康 {{ Math.round(bird.health) }}
-                      </span>
+                <div class="space-y-4">
+                  <div class="bg-green-500/10 rounded-xl p-3 border border-green-500/20">
+                    <div class="text-xs text-green-300 mb-2 flex items-center gap-1">
+                      <span>💰</span> 预期收益
+                    </div>
+                    <div class="space-y-2 text-xs">
+                      <div class="flex justify-between">
+                        <span class="text-white/70">预期物资数量</span>
+                        <span class="font-bold text-yellow-300 text-sm">
+                          ~{{ currentExpectedRewards }} 件
+                        </span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-white/70">奖励倍率</span>
+                        <span class="font-bold text-yellow-400 text-sm">
+                          x{{ EXPEDITION_REWARD_MULTIPLIER[selectedDistance] }}
+                        </span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-white/70">食物消耗</span>
+                        <span class="text-red-300 text-sm">
+                          -{{ EXPEDITION_FOOD_COST[selectedDistance] }} 🍒
+                        </span>
+                      </div>
                     </div>
                   </div>
-                  <div v-else class="text-xs text-white/40 italic">
-                    请选择远征队员...
+
+                  <div class="bg-orange-500/10 rounded-xl p-3 border border-orange-500/20">
+                    <div class="text-xs text-orange-300 mb-2 flex items-center gap-1">
+                      <span>❤️</span> 体力消耗
+                    </div>
+                    <div class="space-y-2 text-xs">
+                      <div class="flex justify-between">
+                        <span class="text-white/70">预期健康损失</span>
+                        <span class="font-bold text-red-300 text-sm">
+                          ~{{ currentExpectedHealthLoss }} 点/只
+                        </span>
+                      </div>
+                      <div class="flex justify-between">
+                        <span class="text-white/70">天气体力影响</span>
+                        <span :class="EXPEDITION_WEATHER_EFFECTS[state.currentWeather].healthMod > 1 ? 'text-red-400' : 'text-green-400'">
+                          {{ EXPEDITION_WEATHER_EFFECTS[state.currentWeather].healthMod > 1 ? '+' : '' }}
+                          {{ ((EXPEDITION_WEATHER_EFFECTS[state.currentWeather].healthMod - 1) * 100).toFixed(0) }}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="text-xs text-white/70 mb-1.5">队伍成员 (性格影响):</div>
+                    <div v-if="selectedBirds.length > 0" class="space-y-1.5 max-h-24 overflow-y-auto">
+                      <div
+                        v-for="bird in selectedBirds"
+                        :key="bird.id"
+                        class="flex items-center gap-2 text-xs"
+                      >
+                        <span class="w-5 h-5 rounded-full bg-yellow-400/20 flex items-center justify-center text-[10px]">🐦</span>
+                        <span class="text-white/80">{{ bird.name }}</span>
+                        <span class="text-white/40 ml-auto text-[10px]">
+                          ❤️{{ Math.round(bird.health) }}
+                          <span
+                            v-if="PERSONALITY_EXPEDITION_MODS[bird.personality]"
+                            :class="PERSONALITY_EXPEDITION_MODS[bird.personality].riskMod < 1 ? 'text-green-400' : 'text-red-400'"
+                          >
+                            (风险x{{ PERSONALITY_EXPEDITION_MODS[bird.personality].riskMod.toFixed(1) }})
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+                    <div v-else class="text-xs text-white/40 italic">
+                      请选择远征队员...
+                    </div>
                   </div>
                 </div>
               </div>
@@ -423,17 +538,22 @@ const getRemainingTime = (expedition: { returnTime: number }) => {
             v-for="expedition in completedExpeditions"
             :key="expedition.id"
             :class="[
-              'rounded-2xl p-4 border',
+              'rounded-2xl p-4 border space-y-3',
               expedition.success
                 ? 'bg-green-500/10 border-green-500/30'
                 : 'bg-red-500/10 border-red-500/30',
             ]"
           >
-            <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <span class="text-xl">{{ expedition.success ? '✅' : '❌' }}</span>
                 <span class="font-medium text-white">
                   {{ EXPEDITION_DISTANCE_NAMES[expedition.distance] }}
+                </span>
+                <span
+                  :class="['text-[10px] px-2 py-0.5 rounded-full', getRiskColor(expedition.riskLevel), 'bg-black/20']"
+                >
+                  风险 {{ (expedition.riskLevel * 100).toFixed(0) }}%
                 </span>
               </div>
               <div class="text-xs text-white/50">
@@ -441,28 +561,96 @@ const getRemainingTime = (expedition: { returnTime: number }) => {
               </div>
             </div>
 
-            <div class="text-xs text-white/70 mb-2">
-              队员: {{ expedition.birdIds.map(id => getExpeditionBird(id)?.name || '?').join('、') }}
+            <div class="text-xs text-white/70">
+              <span class="text-white/50">队员:</span> {{ expedition.birdIds.map(id => getExpeditionBird(id)?.name || '?').join('、') }}
             </div>
 
-            <div v-if="expedition.success" class="space-y-2">
-              <div class="text-xs text-white/60">获得奖励:</div>
-              <div class="flex flex-wrap gap-2">
-                <div
-                  v-for="reward in expedition.rewards"
-                  :key="reward.id"
-                  :class="['px-2 py-1 rounded-lg text-xs bg-gradient-to-r text-white', RARE_RESOURCE_COLORS[reward.type]]"
-                >
-                  {{ RARE_RESOURCE_EMOJI[reward.type] }} {{ RARE_RESOURCE_NAMES[reward.type] }} x{{ reward.amount }}
+            <div class="text-xs text-white/60 flex flex-wrap gap-2">
+              <span class="text-white/50">沿途天气:</span>
+              <span
+                v-for="(weather, idx) in expedition.weatherEncountered"
+                :key="idx"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/10"
+              >
+                {{ WEATHER_NAMES[weather] }}
+              </span>
+            </div>
+
+            <div v-if="expedition.success" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="bg-black/20 rounded-xl p-3">
+                <div class="text-xs text-green-300 mb-2 flex items-center gap-1">
+                  <span>💎</span> 收获物资
+                </div>
+                <div class="flex flex-wrap gap-1.5">
+                  <div
+                    v-for="reward in expedition.rewards"
+                    :key="reward.id"
+                    :class="['px-2 py-1 rounded-lg text-xs bg-gradient-to-r text-white flex items-center gap-1', RARE_RESOURCE_COLORS[reward.type]]"
+                  >
+                    <span>{{ RARE_RESOURCE_EMOJI[reward.type] }}</span>
+                    <span>{{ RARE_RESOURCE_NAMES[reward.type] }}</span>
+                    <span class="font-bold">x{{ reward.amount }}</span>
+                    <span class="text-yellow-200 text-[10px] ml-0.5">
+                      {{ getStarDisplay(RARE_RESOURCE_RARITY[reward.type]) }}
+                    </span>
+                  </div>
+                </div>
+                <div v-if="expedition.rewards.length === 0" class="text-xs text-white/40 italic">
+                  没有带回物资
                 </div>
               </div>
-              <div class="text-xs text-red-300">
-                体力消耗: -{{ expedition.healthLoss }} ❤️
+
+              <div class="bg-black/20 rounded-xl p-3">
+                <div class="text-xs text-orange-300 mb-2 flex items-center gap-1">
+                  <span>📊</span> 消耗统计
+                </div>
+                <div class="space-y-1.5 text-xs">
+                  <div class="flex justify-between">
+                    <span class="text-white/60">队伍体力损失</span>
+                    <span class="text-red-300 font-bold">-{{ expedition.healthLoss }} ❤️/只</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-white/60">食物消耗</span>
+                    <span class="text-red-300">-{{ EXPEDITION_FOOD_COST[expedition.distance] }} 🍒</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-white/60">奖励倍率</span>
+                    <span class="text-yellow-400 font-bold">x{{ EXPEDITION_REWARD_MULTIPLIER[expedition.distance] }}</span>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div v-else class="text-xs text-red-300">
-              远征失败，队伍受伤而归...
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="bg-red-900/30 rounded-xl p-3 border border-red-500/20">
+                <div class="text-xs text-red-300 mb-1.5 flex items-center gap-1">
+                  <span>💔</span> 远征失败
+                </div>
+                <div class="text-xs text-white/70">
+                  队伍未能成功带回物资，还在途中受了伤...
+                </div>
+              </div>
+              <div class="bg-black/20 rounded-xl p-3">
+                <div class="text-xs text-orange-300 mb-1.5 flex items-center gap-1">
+                  <span>📊</span> 损失统计
+                </div>
+                <div class="space-y-1.5 text-xs">
+                  <div class="flex justify-between">
+                    <span class="text-white/60">预期风险</span>
+                    <span :class="['font-bold', getRiskColor(expedition.riskLevel)]">
+                      {{ (expedition.riskLevel * 100).toFixed(0) }}%
+                    </span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-white/60">体力损失</span>
+                    <span class="text-red-300 font-bold">-{{ expedition.healthLoss }} ❤️/只</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-white/60">食物消耗</span>
+                    <span class="text-red-300">-{{ EXPEDITION_FOOD_COST[expedition.distance] }} 🍒</span>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -488,8 +676,11 @@ const getRemainingTime = (expedition: { returnTime: number }) => {
               <div class="text-4xl mb-2">{{ RARE_RESOURCE_EMOJI[resource.type] }}</div>
               <div class="font-medium text-white text-sm">{{ RARE_RESOURCE_NAMES[resource.type] }}</div>
               <div class="text-2xl font-bold text-white mt-1">{{ resource.amount }}</div>
-              <div class="text-[10px] text-white/70 mt-1">
-                稀有度: {'⭐'.repeat(RARE_RESOURCE_RARITY[resource.type])}
+              <div class="text-yellow-300 text-sm mt-1.5 tracking-wider font-bold">
+                {{ getStarDisplay(RARE_RESOURCE_RARITY[resource.type]) }}
+              </div>
+              <div class="text-[10px] text-white/60 mt-0.5">
+                稀有度 {{ RARE_RESOURCE_RARITY[resource.type] }}/5
               </div>
             </div>
           </div>
